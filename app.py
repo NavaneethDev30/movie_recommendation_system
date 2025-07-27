@@ -7,17 +7,21 @@ import numpy as np
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# Load TMDB API key
 load_dotenv()
-
 API_KEY = os.getenv('TMDB_API_KEY')
+
+# Constants
 POSTER_BASE_URL = "https://image.tmdb.org/t/p/w500"
 PLACEHOLDER_IMAGE = "https://via.placeholder.com/500x750?text=No+Poster"
 MAX_RETRIES = 3
 TIMEOUT = 15  # seconds
 
+# Streamlit page config
 st.set_page_config(page_title="Movie Recommender", page_icon="🎬", layout="wide")
 st.header("🎬 Movie Recommendation Engine")
 
+# Load movie data and similarity matrix
 @st.cache_data
 def load_data():
     try:
@@ -32,6 +36,7 @@ def load_data():
 
 movies, similarity = load_data()
 
+# Fetch movie poster from TMDB
 def fetch_poster(movie_id):
     for attempt in range(MAX_RETRIES):
         try:
@@ -42,35 +47,35 @@ def fetch_poster(movie_id):
             )
             if response.status_code == 200:
                 poster_path = response.json().get('poster_path')
-                if poster_path:
-                    return f"{POSTER_BASE_URL}{poster_path}"
-                else:
-                    return PLACEHOLDER_IMAGE
+                return f"{POSTER_BASE_URL}{poster_path}" if poster_path else PLACEHOLDER_IMAGE
         except requests.exceptions.RequestException:
             if attempt == MAX_RETRIES - 1:
                 return PLACEHOLDER_IMAGE
             time.sleep(0.5)
     return PLACEHOLDER_IMAGE
 
+# Recommend similar movies
 def recommend(movie_title, top_n=5):
     try:
         movie_index = movies[movies['title'] == movie_title].index[0]
-        similar_indices = np.argsort(-similarity[movie_index])[1:top_n*5]  # get extra
+        similar_indices = np.argsort(-similarity[movie_index])[1:top_n * 5]
 
         recommendations = []
         movie_candidates = [movies.iloc[idx] for idx in similar_indices]
 
-        # Fetch posters in parallel
         with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {executor.submit(fetch_poster, movie.movie_id): movie for movie in movie_candidates}
+            futures = {
+                executor.submit(fetch_poster, movie['movie_id']): movie
+                for movie in movie_candidates
+            }
             for future in as_completed(futures):
                 movie = futures[future]
                 poster = future.result()
                 if poster:
                     recommendations.append({
-                        'title': movie.title,
+                        'title': movie['title'],
                         'poster': poster,
-                        'id': movie.movie_id
+                        'id': movie['movie_id']
                     })
                     if len(recommendations) >= top_n:
                         break
@@ -79,6 +84,7 @@ def recommend(movie_title, top_n=5):
         st.error(f"Recommendation error: {str(e)}")
         return None
 
+# UI
 selected_movie = st.selectbox(
     "Select a movie:",
     movies['title'].values,
